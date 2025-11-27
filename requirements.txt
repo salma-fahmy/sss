@@ -2,6 +2,7 @@ streamlit
 pandas
 torch
 transformers
-captum
-google-generativeai
+scikit-learn
 requests
+protobuf
+google-generativeai>=0.3.0
