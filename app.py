@@ -42,8 +42,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ------------------------- Load Data from Dropbox -------------------------
-dropbox_url = "https://www.dropbox.com/scl/fi/wx0fsu580mfl0kjcaub2f/cleaned_reviews.csv?rlkey=bu103t7xhiwwgr78f63uh0b3w&st=macor6xv&dl=1"
-df = pd.read_csv(dropbox_url)
+url = "https://drive.google.com/uc?export=download&id=1L17YWwxNha2OqNMDl21urHU9ckHmGEvY"
+df = pd.read_csv(url)
 
 # Convert Time to datetime & extract Year, Month, Day
 df['Time'] = pd.to_datetime(df['Time'])
@@ -314,6 +314,7 @@ with col2:
     fig_scatter.update_traces(marker=dict(size=6, opacity=0.6))
     fig_scatter.update_layout(height=350, margin=dict(l=40, r=20, t=20, b=40))
     st.plotly_chart(fig_scatter, use_container_width=True)
+
 
 
 
