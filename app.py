@@ -8,39 +8,50 @@ import pandas as pd
 import torch
 import google.generativeai as genai
 
-# ---------------------------- Captum ----------------------------
-from captum.attr import IntegratedGradients
 
 # ---------------------------- Configure Gemini API ----------------------------
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or st.secrets.get("GEMINI_API_KEY", "")
+# Use your API key directly
+GEMINI_API_KEY = "AIzaSyCnF-UaGJFoDLV8ANieBcfbePLUFmJv-yM"
+
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
 
 def summarize_review_with_gemini(cleaned_text: str) -> str:
+    """
+    Use Gemini API to summarize the review after cleaning.
+    """
     if not GEMINI_API_KEY:
-        return "⚠️ Gemini API key not configured. Set GEMINI_API_KEY in environment or Streamlit secrets."
+        return "⚠️ Gemini API key not configured."
     
     try:
+        # List available models and filter for free-tier friendly ones
         available_models = []
         try:
             for model in genai.list_models():
                 if 'generateContent' in model.supported_generation_methods:
+                    # Skip experimental models (they have very limited quotas)
                     if '-exp' not in model.name and 'experimental' not in model.name.lower():
                         available_models.append(model.name)
         except Exception:
             pass
         
+        # Prioritize free-tier friendly models
         preferred_models = ['models/gemini-1.5-flash', 'models/gemini-1.5-flash-8b', 'models/gemini-1.5-pro']
+        
         model_to_use = None
+        
+        # First, try preferred models if they're available
         for preferred in preferred_models:
             if preferred in available_models:
                 model_to_use = preferred
                 break
         
+        # If no preferred model found, use first available non-experimental model
         if not model_to_use and available_models:
             model_to_use = available_models[0]
         
+        # Fallback to trying common names
         if not model_to_use:
             for model_name in ['models/gemini-1.5-flash', 'models/gemini-1.5-flash-8b', 'models/gemini-pro']:
                 try:
@@ -51,9 +62,10 @@ def summarize_review_with_gemini(cleaned_text: str) -> str:
                     continue
         
         if not model_to_use:
-            return "⚠️ Could not find any compatible Gemini model. Please check your API key."
+            return "⚠️ Could not find any compatible Gemini model."
         
         model = genai.GenerativeModel(model_to_use)
+        
         prompt = f"""You are a helpful assistant that summarizes customer reviews concisely.
 
 Review: {cleaned_text}
@@ -77,12 +89,21 @@ def clean_text(text: str) -> str:
 
     text = re.sub(r'http\S+|www\S+|https\S+', '', text)
     text = re.sub(r'<.*?>', '', text)
+
     emoji_pattern = re.compile(
-        "[" u"\U0001F600-\U0001F64F" u"\U0001F300-\U0001F5FF" u"\U0001F680-\U0001F6FF"
-        u"\U0001F1E0-\U0001F1FF" u"\U00002700-\U000027BF" u"\U000024C2-\U0001F251" "]+", flags=re.UNICODE)
+        "[" 
+        u"\U0001F600-\U0001F64F"
+        u"\U0001F300-\U0001F5FF"
+        u"\U0001F680-\U0001F6FF"
+        u"\U0001F1E0-\U0001F1FF"
+        u"\U00002700-\U000027BF"
+        u"\U000024C2-\U0001F251"
+        "]+", flags=re.UNICODE)
     text = emoji_pattern.sub("", text)
+
     text = re.sub(r'[^A-Za-z0-9 ]+', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
+
     return text
 
 
@@ -104,12 +125,13 @@ class InferencePipeline:
             max_length=self.max_length,
             return_tensors="pt"
         )
+
         with torch.no_grad():
             out = self.model(**enc)
             logits = out.logits
             pred_id = int(torch.argmax(logits, dim=-1).item())
-        # رجع input_ids و attention_mask لاستخدام XAI
-        return {"pred_id": pred_id, "input_ids": enc["input_ids"], "attention_mask": enc["attention_mask"]}
+
+        return {"pred_id": pred_id}
 
 
 # ---------------- Label Mapping ----------------
@@ -124,13 +146,17 @@ DROPBOX_URL = "https://www.dropbox.com/scl/fi/4r5mrc3tcrthzvstjpwjn/roberta_pipe
 def load_pipeline():
     placeholder = st.empty()
     placeholder.info("Downloading model from Dropbox…")
+
     try:
         response = requests.get(DROPBOX_URL)
         response.raise_for_status()
+
         file_bytes = BytesIO(response.content)
         pipeline = pickle.load(file_bytes)
+
         placeholder.empty()
         return pipeline
+
     except Exception as e:
         placeholder.error(f"❌ Failed to load model: {e}")
         return None
@@ -139,75 +165,28 @@ def load_pipeline():
 pipeline = load_pipeline()
 
 
-# ---------------------------- Streamlit Setup ----------------------------
+# ---------------------------- Streamlit Page Setup ----------------------------
 st.set_page_config(page_title="Product Reviews Sentiment Analysis", layout="wide")
+
 page_bg = """
 <style>
-.stApp { background: url('https://i.pinimg.com/736x/8a/4c/31/8a4c3184c5ae66e9f090f49db6bd445a.jpg'); background-size: cover; background-position: center; background-repeat: no-repeat;}
+.stApp {
+    background: url('https://i.pinimg.com/736x/8a/4c/31/8a4c3184c5ae66e9f090f49db6bd445a.jpg');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+}
 h1, h2, h3, h4 { color: #111827 !important; }
-[data-testid="stSidebar"] { background-color: rgba(255,255,255,0.5) !important; }
+[data-testid="stSidebar"] {
+    background-color: rgba(255,255,255,0.5) !important;
+}
 </style>
 """
+
 st.markdown(page_bg, unsafe_allow_html=True)
 
 
-# ---------------------------- Single Text Mode ----------------------------
-st.sidebar.title("Configuration")
-input_mode = st.sidebar.radio("Select input mode:", ["Single Text", "Batch CSV"])
-
-if input_mode == "Single Text" and pipeline:
-    st.subheader("Single Review Prediction")
-    text_input = st.text_area("Enter a review:", height=120)
-
-    if st.button("🔍 Predict"):
-        if not text_input.strip():
-            st.warning("Please enter text first.")
-        else:
-            try:
-                cleaned_text = clean_text(text_input)
-                result = pipeline.predict_single(text_input)
-                pred_label = getattr(pipeline, "id2label", DEFAULT_ID2LABEL).get(result["pred_id"], str(result["pred_id"]))
-
-                st.success("✅ Prediction Complete!")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.write("**Prediction ID:**", result["pred_id"])
-                    st.write("**Predicted Label:**", pred_label)
-                with col2:
-                    st.write("**Cleaned Text:**")
-                    st.info(cleaned_text if cleaned_text else "(empty after cleaning)")
-
-                # ------------------ Captum XAI ------------------
-                st.write("---")
-                st.write("**XAI Explanation (word importance)**")
-                ig = IntegratedGradients(pipeline.model)
-
-                input_ids = result["input_ids"].long()
-                attention_mask = result["attention_mask"].long()
-                input_embeddings = pipeline.model.roberta.embeddings.word_embeddings(input_ids)
-                input_embeddings = input_embeddings.requires_grad_()
-
-                def forward_embeds(embeds):
-                    outputs = pipeline.model(inputs_embeds=embeds, attention_mask=attention_mask)
-                    return outputs.logits
-
-                pred_idx = torch.argmax(forward_embeds(input_embeddings), dim=-1)
-                attributions, delta = ig.attribute(inputs=input_embeddings, target=pred_idx, return_convergence_delta=True)
-                attributions = attributions.sum(dim=-1).squeeze(0)
-
-                tokens = pipeline.tokenizer.convert_ids_to_tokens(input_ids[0])
-                top_tokens = sorted(zip(tokens, attributions.detach().cpu().numpy()), key=lambda x: -abs(x[1]))[:5]
-
-                st.write("Top influential tokens:")
-                for tok, score in top_tokens:
-                    st.write(f"{tok}: {score:.3f}")
-
-                # ------------------ Gemini Summary ------------------
-                st.write("---")
-                st.write("Summary")
-                with st.spinner("Generating summary with Gemini..."):
-                    summary = summarize_review_with_gemini(cleaned_text)
-                    st.write(summary)
-
-            except Exception as e:
-                st.error(f"Prediction failed: {e}")
+# ---------------------------- Header ----------------------------
+st.markdown("<h1 style='text-align:center;'>Product Reviews Sentiment Analysis</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center; color:#111;'>Analyze single text or batch CSV files.</p>", unsafe_allow_html=True)
+st.markdown("---")
