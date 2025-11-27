@@ -17,7 +17,6 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or st.secrets.get("GEMINI_API_KEY",
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-
 def summarize_review_with_gemini(cleaned_text: str) -> str:
     if not GEMINI_API_KEY:
         return "⚠️ Gemini API key not configured. Set GEMINI_API_KEY in environment or Streamlit secrets."
@@ -72,7 +71,6 @@ Summary:"""
     except Exception as e:
         return f"⚠️ Error generating summary: {e}"
 
-
 # ---------------------------- Text Preprocessing ----------------------------
 def clean_text(text: str) -> str:
     if not isinstance(text, str):
@@ -82,7 +80,7 @@ def clean_text(text: str) -> str:
     text = re.sub(r'<.*?>', '', text)
 
     emoji_pattern = re.compile(
-        "[" 
+        "["
         u"\U0001F600-\U0001F64F"
         u"\U0001F300-\U0001F5FF"
         u"\U0001F680-\U0001F6FF"
@@ -96,7 +94,6 @@ def clean_text(text: str) -> str:
     text = re.sub(r'\s+', ' ', text).strip()
 
     return text
-
 
 # ---------------------------- Inference Pipeline ----------------------------
 class InferencePipeline:
@@ -122,16 +119,13 @@ class InferencePipeline:
             logits = out.logits
             pred_id = int(torch.argmax(logits, dim=-1).item())
 
-        return {"pred_id": pred_id, "input_ids": enc["input_ids"]}
-
+        return {"pred_id": pred_id, "input_ids": enc["input_ids"], "attention_mask": enc["attention_mask"]}
 
 # ---------------- Label Mapping ----------------
 DEFAULT_ID2LABEL = {0: "negative", 1: "neutral", 2: "positive"}
 
-
 # ---------------- Load Model from Dropbox ----------------
 DROPBOX_URL = "https://www.dropbox.com/scl/fi/4r5mrc3tcrthzvstjpwjn/roberta_pipeline.pkl?rlkey=i5vli1htkljftqqcou8myu8y5&st=xyk2aahu&dl=1"
-
 
 @st.cache_resource
 def load_pipeline():
@@ -152,9 +146,7 @@ def load_pipeline():
         placeholder.error(f"❌ Failed to load model: {e}")
         return None
 
-
 pipeline = load_pipeline()
-
 
 # ---------------------------- Streamlit Page Setup ----------------------------
 st.set_page_config(page_title="Product Reviews Sentiment Analysis", layout="wide")
@@ -166,7 +158,6 @@ h1, h2, h3, h4 { color: #111827 !important; }
 </style>
 """
 st.markdown(page_bg, unsafe_allow_html=True)
-
 
 # ---------------------------- Single Text Mode with XAI ----------------------------
 st.sidebar.title("Configuration")
@@ -183,9 +174,7 @@ if input_mode == "Single Text" and pipeline:
             try:
                 cleaned_text = clean_text(text_input)
                 result = pipeline.predict_single(text_input)
-                pred_label = getattr(pipeline, "id2label", DEFAULT_ID2LABEL).get(
-                    result["pred_id"], str(result["pred_id"])
-                )
+                pred_label = getattr(pipeline, "id2label", DEFAULT_ID2LABEL).get(result["pred_id"], str(result["pred_id"]))
 
                 st.success("✅ Prediction Complete!")
 
@@ -202,16 +191,24 @@ if input_mode == "Single Text" and pipeline:
                 st.write("**XAI Explanation (word importance)**")
                 ig = IntegratedGradients(pipeline.model)
 
-                enc = pipeline.tokenizer(cleaned_text, truncation=True, padding="max_length", max_length=128, return_tensors="pt")
-                input_ids = enc["input_ids"].float().requires_grad_()
-                
-                pred = pipeline.model(**enc).logits
-                pred_idx = torch.argmax(pred, dim=-1)
+                input_ids = result["input_ids"]
+                attention_mask = result["attention_mask"]
 
-                attributions, delta = ig.attribute(inputs=input_ids, target=pred_idx, return_convergence_delta=True)
-                attributions = attributions.sum(dim=-1).squeeze(0)  # sum embedding dimensions
+                # Use embeddings for Captum
+                input_embeddings = pipeline.model.roberta.embeddings.word_embeddings(input_ids)
+                input_embeddings = input_embeddings.requires_grad_()
 
-                tokens = pipeline.tokenizer.convert_ids_to_tokens(input_ids[0].long())
+                # Forward function
+                def forward_embeds(embeds):
+                    outputs = pipeline.model(inputs_embeds=embeds, attention_mask=attention_mask)
+                    return outputs.logits
+
+                pred_idx = torch.argmax(forward_embeds(input_embeddings), dim=-1)
+
+                attributions, delta = ig.attribute(inputs=input_embeddings, target=pred_idx, return_convergence_delta=True)
+                attributions = attributions.sum(dim=-1).squeeze(0)
+
+                tokens = pipeline.tokenizer.convert_ids_to_tokens(input_ids[0])
                 top_tokens = sorted(zip(tokens, attributions.detach().cpu().numpy()), key=lambda x: -abs(x[1]))[:5]
 
                 st.write("Top influential tokens:")
