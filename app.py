@@ -13,9 +13,9 @@ from captum.attr import IntegratedGradients
 
 # ---------------------------- Configure Gemini API ----------------------------
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or st.secrets.get("GEMINI_API_KEY", "")
-
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
+
 
 def summarize_review_with_gemini(cleaned_text: str) -> str:
     if not GEMINI_API_KEY:
@@ -32,7 +32,6 @@ def summarize_review_with_gemini(cleaned_text: str) -> str:
             pass
         
         preferred_models = ['models/gemini-1.5-flash', 'models/gemini-1.5-flash-8b', 'models/gemini-1.5-pro']
-        
         model_to_use = None
         for preferred in preferred_models:
             if preferred in available_models:
@@ -55,7 +54,6 @@ def summarize_review_with_gemini(cleaned_text: str) -> str:
             return "⚠️ Could not find any compatible Gemini model. Please check your API key."
         
         model = genai.GenerativeModel(model_to_use)
-        
         prompt = f"""You are a helpful assistant that summarizes customer reviews concisely.
 
 Review: {cleaned_text}
@@ -71,6 +69,7 @@ Summary:"""
     except Exception as e:
         return f"⚠️ Error generating summary: {e}"
 
+
 # ---------------------------- Text Preprocessing ----------------------------
 def clean_text(text: str) -> str:
     if not isinstance(text, str):
@@ -78,22 +77,14 @@ def clean_text(text: str) -> str:
 
     text = re.sub(r'http\S+|www\S+|https\S+', '', text)
     text = re.sub(r'<.*?>', '', text)
-
     emoji_pattern = re.compile(
-        "["
-        u"\U0001F600-\U0001F64F"
-        u"\U0001F300-\U0001F5FF"
-        u"\U0001F680-\U0001F6FF"
-        u"\U0001F1E0-\U0001F1FF"
-        u"\U00002700-\U000027BF"
-        u"\U000024C2-\U0001F251"
-        "]+", flags=re.UNICODE)
+        "[" u"\U0001F600-\U0001F64F" u"\U0001F300-\U0001F5FF" u"\U0001F680-\U0001F6FF"
+        u"\U0001F1E0-\U0001F1FF" u"\U00002700-\U000027BF" u"\U000024C2-\U0001F251" "]+", flags=re.UNICODE)
     text = emoji_pattern.sub("", text)
-
     text = re.sub(r'[^A-Za-z0-9 ]+', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
-
     return text
+
 
 # ---------------------------- Inference Pipeline ----------------------------
 class InferencePipeline:
@@ -113,42 +104,42 @@ class InferencePipeline:
             max_length=self.max_length,
             return_tensors="pt"
         )
-
         with torch.no_grad():
             out = self.model(**enc)
             logits = out.logits
             pred_id = int(torch.argmax(logits, dim=-1).item())
-
+        # رجع input_ids و attention_mask لاستخدام XAI
         return {"pred_id": pred_id, "input_ids": enc["input_ids"], "attention_mask": enc["attention_mask"]}
+
 
 # ---------------- Label Mapping ----------------
 DEFAULT_ID2LABEL = {0: "negative", 1: "neutral", 2: "positive"}
 
+
 # ---------------- Load Model from Dropbox ----------------
 DROPBOX_URL = "https://www.dropbox.com/scl/fi/4r5mrc3tcrthzvstjpwjn/roberta_pipeline.pkl?rlkey=i5vli1htkljftqqcou8myu8y5&st=xyk2aahu&dl=1"
+
 
 @st.cache_resource
 def load_pipeline():
     placeholder = st.empty()
     placeholder.info("Downloading model from Dropbox…")
-
     try:
         response = requests.get(DROPBOX_URL)
         response.raise_for_status()
-
         file_bytes = BytesIO(response.content)
         pipeline = pickle.load(file_bytes)
-
         placeholder.empty()
         return pipeline
-
     except Exception as e:
         placeholder.error(f"❌ Failed to load model: {e}")
         return None
 
+
 pipeline = load_pipeline()
 
-# ---------------------------- Streamlit Page Setup ----------------------------
+
+# ---------------------------- Streamlit Setup ----------------------------
 st.set_page_config(page_title="Product Reviews Sentiment Analysis", layout="wide")
 page_bg = """
 <style>
@@ -159,7 +150,8 @@ h1, h2, h3, h4 { color: #111827 !important; }
 """
 st.markdown(page_bg, unsafe_allow_html=True)
 
-# ---------------------------- Single Text Mode with XAI ----------------------------
+
+# ---------------------------- Single Text Mode ----------------------------
 st.sidebar.title("Configuration")
 input_mode = st.sidebar.radio("Select input mode:", ["Single Text", "Batch CSV"])
 
@@ -177,7 +169,6 @@ if input_mode == "Single Text" and pipeline:
                 pred_label = getattr(pipeline, "id2label", DEFAULT_ID2LABEL).get(result["pred_id"], str(result["pred_id"]))
 
                 st.success("✅ Prediction Complete!")
-
                 col1, col2 = st.columns(2)
                 with col1:
                     st.write("**Prediction ID:**", result["pred_id"])
@@ -191,20 +182,16 @@ if input_mode == "Single Text" and pipeline:
                 st.write("**XAI Explanation (word importance)**")
                 ig = IntegratedGradients(pipeline.model)
 
-                input_ids = result["input_ids"]
-                attention_mask = result["attention_mask"]
-
-                # Use embeddings for Captum
+                input_ids = result["input_ids"].long()
+                attention_mask = result["attention_mask"].long()
                 input_embeddings = pipeline.model.roberta.embeddings.word_embeddings(input_ids)
                 input_embeddings = input_embeddings.requires_grad_()
 
-                # Forward function
                 def forward_embeds(embeds):
                     outputs = pipeline.model(inputs_embeds=embeds, attention_mask=attention_mask)
                     return outputs.logits
 
                 pred_idx = torch.argmax(forward_embeds(input_embeddings), dim=-1)
-
                 attributions, delta = ig.attribute(inputs=input_embeddings, target=pred_idx, return_convergence_delta=True)
                 attributions = attributions.sum(dim=-1).squeeze(0)
 
