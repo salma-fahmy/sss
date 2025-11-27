@@ -11,8 +11,7 @@ import google.generativeai as genai
 
 # ---------------------------- Configure Gemini API ----------------------------
 # Configure your Gemini API key
-# You can set it as an environment variable or use Streamlit secrets
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or st.secrets.get("GEMINI_API_KEY", "")
+GEMINI_API_KEY = "AIzaSyCnF-UaGJFoDLV8ANieBcfbePLUFmJv-yM"
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
@@ -26,46 +25,10 @@ def summarize_review_with_gemini(cleaned_text: str) -> str:
         return "⚠️ Gemini API key not configured. Set GEMINI_API_KEY in environment or Streamlit secrets."
     
     try:
-        # List available models and filter for free-tier friendly ones
-        available_models = []
-        try:
-            for model in genai.list_models():
-                if 'generateContent' in model.supported_generation_methods:
-                    # Skip experimental models (they have very limited quotas)
-                    if '-exp' not in model.name and 'experimental' not in model.name.lower():
-                        available_models.append(model.name)
-        except Exception:
-            pass
-        
-        # Prioritize free-tier friendly models
-        preferred_models = ['models/gemini-1.5-flash', 'models/gemini-1.5-flash-8b', 'models/gemini-1.5-pro']
-        
-        model_to_use = None
-        
-        # First, try preferred models if they're available
-        for preferred in preferred_models:
-            if preferred in available_models:
-                model_to_use = preferred
-                break
-        
-        # If no preferred model found, use first available non-experimental model
-        if not model_to_use and available_models:
-            model_to_use = available_models[0]
-        
-        # Fallback to trying common names
-        if not model_to_use:
-            for model_name in ['models/gemini-1.5-flash', 'models/gemini-1.5-flash-8b', 'models/gemini-pro']:
-                try:
-                    model = genai.GenerativeModel(model_name)
-                    model_to_use = model_name
-                    break
-                except Exception:
-                    continue
-        
-        if not model_to_use:
-            return "⚠️ Could not find any compatible Gemini model. Please check your API key."
-        
-        model = genai.GenerativeModel(model_to_use)
+        # Explicitly use the stable, free-tier friendly model
+        # We avoid listing models dynamically because it might pick up experimental models (like gemini-2.5-pro-exp)
+        # which have very strict quotas.
+        model = genai.GenerativeModel('gemini-1.5-flash')
         
         prompt = f"""You are a helpful assistant that summarizes customer reviews concisely.
 
