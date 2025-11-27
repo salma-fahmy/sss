@@ -82,7 +82,7 @@ def clean_text(text: str) -> str:
     text = re.sub(r'<.*?>', '', text)
 
     emoji_pattern = re.compile(
-        "["
+        "[" 
         u"\U0001F600-\U0001F64F"
         u"\U0001F300-\U0001F5FF"
         u"\U0001F680-\U0001F6FF"
@@ -203,8 +203,7 @@ if input_mode == "Single Text" and pipeline:
                 ig = IntegratedGradients(pipeline.model)
 
                 enc = pipeline.tokenizer(cleaned_text, truncation=True, padding="max_length", max_length=128, return_tensors="pt")
-                input_ids = enc["input_ids"]
-                input_ids = input_ids.requires_grad_()
+                input_ids = enc["input_ids"].float().requires_grad_()
                 
                 pred = pipeline.model(**enc).logits
                 pred_idx = torch.argmax(pred, dim=-1)
@@ -212,7 +211,7 @@ if input_mode == "Single Text" and pipeline:
                 attributions, delta = ig.attribute(inputs=input_ids, target=pred_idx, return_convergence_delta=True)
                 attributions = attributions.sum(dim=-1).squeeze(0)  # sum embedding dimensions
 
-                tokens = pipeline.tokenizer.convert_ids_to_tokens(input_ids[0])
+                tokens = pipeline.tokenizer.convert_ids_to_tokens(input_ids[0].long())
                 top_tokens = sorted(zip(tokens, attributions.detach().cpu().numpy()), key=lambda x: -abs(x[1]))[:5]
 
                 st.write("Top influential tokens:")
